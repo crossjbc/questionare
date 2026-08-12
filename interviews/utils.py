@@ -8,6 +8,7 @@ from typing import List
 import os
 from pypdf import PdfReader
 from .models import Document, ReferenceSnippet
+from .embedding import embed_text, EmbeddingError
 
 def chunk_text(
     text: str,
@@ -107,14 +108,6 @@ def extract_text(document) -> str:
 # Celery task in Step 7 will just be a thin wrapper calling this.
 
 def process_document(document: Document) -> None:
-    """
-    Run the full pipeline for a single Document:
-    extract text -> chunk it -> save each chunk as a ReferenceSnippet.
-
-    Does NOT embed the chunks yet - that's added in Step 6, once Gemini
-    is wired in. For now this leaves ReferenceSnippet.embedding as null,
-    which is fine since the field allows null=True, blank=True.
-    """
     document.status = Document.Status.PROCESSING
     document.error_message = ""
     document.save(update_fields=["status", "error_message"])
@@ -129,8 +122,6 @@ def process_document(document: Document) -> None:
                 "or contain only whitespace."
             )
 
-        # Reprocessing safety: wipe any snippets from a previous run of
-        # this same document before creating fresh ones.
         ReferenceSnippet.objects.filter(document=document).delete()
 
         snippet_objects = [
@@ -144,9 +135,28 @@ def process_document(document: Document) -> None:
         ]
         ReferenceSnippet.objects.bulk_create(snippet_objects)
 
+        # --- NEW: embed each snippet, then save the embeddings ---
+        # bulk_create doesn't reliably return usable PKs on every DB
+        # backend, so we re-fetch the snippets we just created for this
+        # document to get real objects with IDs we can update.
+        created_snippets = list(ReferenceSnippet.objects.filter(document=document))
+
+        for snippet in created_snippets:
+            try:
+                snippet.embedding = embed_text(snippet.content, task_type="RETRIEVAL_DOCUMENT")
+            except EmbeddingError as e:
+                # Don't let one bad chunk fail the whole document - log
+                # and leave that snippet's embedding null, still searchable
+                # once retried later.
+                snippet.embedding = None
+                document.error_message += f"\nEmbedding failed for a chunk: {e}"
+
+        ReferenceSnippet.objects.bulk_update(created_snippets, ["embedding"])
+        # --- end new section ---
+
         document.status = Document.Status.DONE
         document.chunk_count = len(snippet_objects)
-        document.save(update_fields=["status", "chunk_count"])
+        document.save(update_fields=["status", "chunk_count", "error_message"])
 
     except ExtractionError as e:
         document.status = Document.Status.FAILED
@@ -154,8 +164,6 @@ def process_document(document: Document) -> None:
         document.save(update_fields=["status", "error_message"])
 
     except Exception as e:
-        # Catch-all so an unexpected bug never leaves a document stuck
-        # in "processing" forever with no explanation.
         document.status = Document.Status.FAILED
         document.error_message = f"Unexpected error during processing: {e}"
         document.save(update_fields=["status", "error_message"])

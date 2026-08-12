@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from dotenv import load_dotenv
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -13,6 +15,9 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-key-change-me")
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+import os
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

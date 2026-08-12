@@ -1,5 +1,6 @@
 from rest_framework import mixins, generics, permissions
-from rest_framework.response import Response, generics, permissions
+from rest_framework.response import Response
+from rest_framework import generics, permissions
 
 from .models import Question, ReferenceSnippet, Session, Track, Turn, Document
 from .serializers import (
@@ -269,6 +270,7 @@ class TurnDetailView(
     def delete(self, request, *args, **kwargs):
         return self.destroy(request, *args, **kwargs)
     
+from rest_framework.permissions import AllowAny
 
 class DocumentListCreateView(generics.ListCreateAPIView):
     """
